@@ -1,0 +1,58 @@
+image:
+  repository: ghcr.io/wangyuyan-agent/sensevoice-small
+  tag: "2025.12.30"
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+strategy:
+  type: Recreate
+
+resources:
+  limits:
+    cpu: "1.5"
+    memory: 3584Mi
+  requests:
+    cpu: 200m
+    memory: 2048Mi
+
+service:
+  type: ClusterIP
+  port: 8000
+
+hostPort:
+  enabled: true
+  port: 8000
+
+env:
+  SENSEVOICE_DEVICE: cpu
+  PYTHONUNBUFFERED: "1"
+
+startupProbe:
+  httpGet:
+    path: /v1/models
+    port: 8000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  failureThreshold: 30
+  timeoutSeconds: 5
+
+livenessProbe:
+  httpGet:
+    path: /v1/models
+    port: 8000
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /v1/models
+    port: 8000
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

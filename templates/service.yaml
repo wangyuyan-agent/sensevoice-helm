@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sensevoice-helm.fullname" . }}
+  labels:
+    {{- include "sensevoice-helm.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - port: {{ .Values.service.port }}
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    {{- include "sensevoice-helm.selectorLabels" . | nindent 4 }}

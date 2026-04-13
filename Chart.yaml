@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sensevoice-helm
+description: SenseVoice Small STT service with OpenAI-compatible API
+type: application
+version: 0.1.0
+appVersion: "2025.12.30"

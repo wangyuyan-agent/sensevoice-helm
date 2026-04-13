@@ -1,0 +1,9 @@
+SenseVoice Small {{ .Chart.AppVersion }} deployed!
+
+OpenAI-compatible API:
+  POST /v1/audio/transcriptions
+  GET  /v1/models
+
+{{- if .Values.hostPort.enabled }}
+Host access: http://localhost:{{ .Values.hostPort.port }}/v1/audio/transcriptions
+{{- end }}

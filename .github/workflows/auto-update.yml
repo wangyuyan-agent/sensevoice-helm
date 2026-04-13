@@ -1,0 +1,106 @@
+# Checks FunAudioLLM/SenseVoice for new commits daily.
+# On change: syncs code, builds Docker image, bumps Helm chart, pushes OCI chart to GHCR.
+name: Auto Update
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # daily 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  UPSTREAM_REPO: FunAudioLLM/SenseVoice
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/sensevoice-small
+  CHART_OCI: oci://ghcr.io/${{ github.repository_owner }}/sensevoice-helm
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Get upstream latest commit
+      id: upstream
+      run: |
+        LATEST_SHA=$(curl -s "https://api.github.com/repos/$UPSTREAM_REPO/commits/main" | jq -r '.sha')
+        LATEST_DATE=$(curl -s "https://api.github.com/repos/$UPSTREAM_REPO/commits/main" | jq -r '.commit.committer.date' | cut -dT -f1)
+        echo "sha=$LATEST_SHA" >> "$GITHUB_OUTPUT"
+        echo "date=$LATEST_DATE" >> "$GITHUB_OUTPUT"
+        echo "Upstream: $LATEST_SHA ($LATEST_DATE)"
+
+    - name: Check if already up to date
+      id: check
+      run: |
+        CURRENT=$(grep '^appVersion' Chart.yaml | awk '{print $2}' | tr -d '"')
+        LATEST="${{ steps.upstream.outputs.date }}"
+        # Normalize date format
+        LATEST_NORM=$(echo "$LATEST" | tr '-' '.')
+        echo "current=$CURRENT latest=$LATEST_NORM"
+        if [ "$CURRENT" = "$LATEST_NORM" ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "app_version=$LATEST_NORM" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Sync upstream source
+      if: steps.check.outputs.skip == 'false'
+      run: |
+        # Clone upstream, copy only the files we need
+        git clone --depth 1 https://github.com/$UPSTREAM_REPO /tmp/sensevoice
+        cp /tmp/sensevoice/model.py ./model.py
+        cp /tmp/sensevoice/api.py ./api.py 2>/dev/null || true
+        cp -r /tmp/sensevoice/utils/ ./utils/ 2>/dev/null || true
+
+    - name: Bump versions
+      if: steps.check.outputs.skip == 'false'
+      id: bump
+      run: |
+        APP_VERSION="${{ steps.check.outputs.app_version }}"
+        # Bump chart version (patch)
+        CURRENT_CHART=$(grep '^version' Chart.yaml | awk '{print $2}')
+        IFS='.' read -r major minor patch <<< "$CURRENT_CHART"
+        NEW_CHART="$major.$minor.$((patch + 1))"
+        sed -i "s/^version:.*/version: $NEW_CHART/" Chart.yaml
+        sed -i "s/^appVersion:.*/appVersion: \"$APP_VERSION\"/" Chart.yaml
+        sed -i "s/^  tag:.*/  tag: \"$APP_VERSION\"/" values.yaml
+        echo "chart_version=$NEW_CHART" >> "$GITHUB_OUTPUT"
+        echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Login to GHCR
+      if: steps.check.outputs.skip == 'false'
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      if: steps.check.outputs.skip == 'false'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ env.IMAGE_NAME }}:${{ steps.bump.outputs.app_version }}
+          ${{ env.IMAGE_NAME }}:latest
+
+    - name: Package and push Helm chart
+      if: steps.check.outputs.skip == 'false'
+      run: |
+        helm package .
+        helm push sensevoice-helm-${{ steps.bump.outputs.chart_version }}.tgz ${{ env.CHART_OCI }}
+
+    - name: Commit version bump
+      if: steps.check.outputs.skip == 'false'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A
+        git commit -m "chore: bump to upstream ${{ steps.bump.outputs.app_version }}"
+        git push
