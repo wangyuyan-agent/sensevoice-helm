@@ -1,0 +1,69 @@
+name: Check Upstream
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force update even if no upstream change"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Get upstream latest commit
+      id: upstream
+      run: |
+        LATEST_SHA=$(curl -s "https://api.github.com/repos/FunAudioLLM/SenseVoice/commits/main" | jq -r '.sha')
+        LATEST_DATE=$(curl -s "https://api.github.com/repos/FunAudioLLM/SenseVoice/commits/main" | jq -r '.commit.committer.date' | cut -dT -f1)
+        echo "sha=${LATEST_SHA}" >> "$GITHUB_OUTPUT"
+        echo "date=${LATEST_DATE}" >> "$GITHUB_OUTPUT"
+
+    - name: Check if update needed
+      id: check
+      run: |
+        CURRENT=$(grep '^appVersion' Chart.yaml | awk '{print $2}' | tr -d '"')
+        LATEST=$(echo "${{ steps.upstream.outputs.date }}" | tr '-' '.')
+        echo "current=$CURRENT latest=$LATEST"
+        if [ "${{ inputs.force }}" = "true" ]; then
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        elif [ "$CURRENT" = "$LATEST" ]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
+        echo "app_version=$LATEST" >> "$GITHUB_OUTPUT"
+
+    - name: Sync upstream source
+      if: steps.check.outputs.skip == 'false'
+      run: |
+        git clone --depth 1 https://github.com/FunAudioLLM/SenseVoice /tmp/sensevoice
+        cp /tmp/sensevoice/model.py ./model.py
+        cp -r /tmp/sensevoice/utils/ ./utils/
+
+    - name: Bump versions
+      if: steps.check.outputs.skip == 'false'
+      run: |
+        APP="${{ steps.check.outputs.app_version }}"
+        CUR=$(grep '^version' Chart.yaml | awk '{print $2}')
+        IFS='.' read -r major minor patch <<< "$CUR"
+        NEW="$major.$minor.$((patch + 1))"
+        sed -i "s/^version:.*/version: $NEW/" Chart.yaml
+        sed -i "s/^appVersion:.*/appVersion: \"$APP\"/" Chart.yaml
+        sed -i "s/^  tag:.*/  tag: \"$APP\"/" values.yaml
+
+    - name: Commit and push
+      if: steps.check.outputs.skip == 'false'
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add -A
+        git commit -m "chore: bump to upstream ${{ steps.check.outputs.app_version }}"
+        git push

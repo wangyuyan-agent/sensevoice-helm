@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["Chart.yaml"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: azure/setup-helm@v4
+
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Read versions
+      id: ver
+      run: |
+        echo "chart=$(grep '^version' Chart.yaml | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+        echo "app=$(grep '^appVersion' Chart.yaml | awk '{print $2}' | tr -d '\"')" >> "$GITHUB_OUTPUT"
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository_owner }}/sensevoice-small:${{ steps.ver.outputs.app }}
+          ghcr.io/${{ github.repository_owner }}/sensevoice-small:latest
+
+    - name: Package and push Helm chart
+      run: |
+        helm package .
+        helm push sensevoice-helm-${{ steps.ver.outputs.chart }}.tgz oci://ghcr.io/${{ github.repository_owner }}
+
+    - name: Create GitHub Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG="sensevoice-helm-${{ steps.ver.outputs.chart }}"
+        gh release create "$TAG" \
+          sensevoice-helm-${{ steps.ver.outputs.chart }}.tgz \
+          --title "$TAG" \
+          --notes "App version: ${{ steps.ver.outputs.app }}" \
+          --latest || echo "Release already exists"
