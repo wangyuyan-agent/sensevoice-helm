@@ -78,6 +78,28 @@ print(result.text)
 | `hostPort.port` | `8000` | Host port number |
 | `env.SENSEVOICE_DEVICE` | `cpu` | Device (`cpu` or `cuda`) |
 
+## Minimum VPS Requirements
+
+SenseVoice Small loads a ~900M parameter model entirely into RAM.
+
+| Resource | Minimum (STT only) | Recommended (with other services) |
+|----------|--------------------|------------------------------------|
+| RAM | 5 GiB | 8 GiB |
+| CPU | 1 vCPU (slow inference) | 2 vCPU |
+| Disk | 15 GiB | 20 GiB |
+| Swap | 2 GiB (required) | 4 GiB |
+
+Memory breakdown (steady state):
+
+| Component | Memory |
+|-----------|--------|
+| SenseVoice model + runtime | ~3.4 GiB |
+| k3s server + containerd | ~450 MiB |
+| CoreDNS + system pods | ~60 MiB |
+| Linux OS | ~300 MiB |
+
+CPU is only consumed during inference (~1-1.5 cores for a few seconds per request). Idle usage is negligible (<0.3%).
+
 ### Memory Sizing
 
 SenseVoice Small loads a ~900M parameter model into memory. On CPU:
