@@ -116,6 +116,35 @@ The `release.yml` workflow triggers on Chart.yaml changes:
 helm uninstall sensevoice -n openclaw
 ```
 
+## Access
+
+With `hostPort.enabled: true` (default), the STT API is available at `localhost:8000` on the host machine. Any process on the host can call it — not just k3s pods.
+
+```bash
+# From host (systemd services, scripts, etc.)
+curl http://localhost:8000/v1/audio/transcriptions -F "file=@audio.wav" -F "model=iic/SenseVoiceSmall"
+
+# From k3s pods in the same namespace
+curl http://sensevoice-sensevoice-helm:8000/v1/audio/transcriptions ...
+
+# From k3s pods in other namespaces
+curl http://sensevoice-sensevoice-helm.openclaw.svc:8000/v1/audio/transcriptions ...
+```
+
+### Security
+
+`hostPort` binds to `0.0.0.0` — without a firewall, the STT API is exposed to the public internet. Block external access:
+
+```bash
+# iptables (immediate)
+sudo iptables -t raw -I PREROUTING -p tcp --dport 8000 \
+  ! -s 127.0.0.0/8 -m addrtype ! --src-type LOCAL -j DROP
+
+# Or use your cloud provider's security group to block port 8000 from external traffic
+```
+
+If you only need k3s-internal access, set `hostPort.enabled: false` in values.yaml.
+
 ## Design Notes
 
 - **No official Helm chart exists** for SenseVoice — this chart wraps the upstream Python code with a FastAPI server providing OpenAI API compatibility
